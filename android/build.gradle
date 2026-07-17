@@ -1,0 +1,78 @@
+// cpp_log — Android build glue (ffiPlugin + native adapter).
+//
+// Builds the shared native logging core from ../src (plus a small JNI shim) into
+// libcpp_log.so with the NDK, and compiles a Kotlin adapter (CppLog.kt) so native
+// Android callers can funnel records into the same cpp_log core as the C++
+// plugins and the Dart FFI bridge. The Dart side loads the .so via
+// DynamicLibrary.open('libcpp_log.so') (see lib/cpp_log.dart _openLibrary).
+//
+// NOT verified on Android yet — structural build glue only. The core sources are
+// the same ones compiled on Windows; only the NDK/Gradle build path is
+// unvalidated. Versions below mirror the app's typical Flutter Android toolchain
+// and may need aligning with the host project's AGP/Kotlin versions.
+group 'com.cloudplayplus.cpp_log'
+version '1.0'
+
+buildscript {
+    ext.kotlin_version = '1.8.22'
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.1.0'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+
+android {
+    namespace 'com.cloudplayplus.cpp_log'
+    compileSdk 34
+
+    // Kotlin sources live under the conventional path.
+    sourceSets {
+        main.kotlin.srcDirs += 'src/main/kotlin'
+    }
+
+    defaultConfig {
+        minSdk 21
+        externalNativeBuild {
+            cmake {
+                // C++17 for std::filesystem (FileSink rotation); shared STL so a
+                // single libc++_shared.so is used app-wide.
+                cppFlags '-std=c++17'
+                arguments '-DANDROID_STL=c++_shared'
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
+
+    // NDK build of the shared core + JNI shim.
+    externalNativeBuild {
+        cmake {
+            path 'src/main/cpp/CMakeLists.txt'
+        }
+    }
+}
+
+dependencies {
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
+}

@@ -1,0 +1,6 @@
+<!-- cpp_log Android library manifest. namespace/package is provided by
+     android { namespace ... } in build.gradle; this manifest is intentionally
+     minimal (no components) since the plugin ships only a native library plus a
+     Kotlin adapter for in-process callers. NOT verified on Android. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+</manifest>
