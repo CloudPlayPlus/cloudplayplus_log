@@ -28,6 +28,19 @@
 #include <unistd.h>  // getpid
 #endif
 
+// Debug-only console mirror (see MirrorToConsole / WorkerMain): needs
+// OutputDebugStringA. Pulled in only for debug Windows builds; release (NDEBUG)
+// emits nothing to stdout / the debugger and never includes <windows.h> here.
+#if defined(_WIN32) && !defined(NDEBUG)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>  // OutputDebugStringA
+#endif
+
 // The DartPortSink (and the vendored dynamically-linked Dart API it posts
 // through) is only meaningful inside a process that hosts a Dart isolate. A
 // native-only consumer — e.g. a Windows service that compiles this core
@@ -294,6 +307,32 @@ class FileSink : public Sink {
 };
 
 // ---------------------------------------------------------------------------
+// Debug-only console mirror
+// ---------------------------------------------------------------------------
+
+// In debug builds every drained record is ALSO written to the debugger
+// (OutputDebugString) and stdout, so native logs stay visible live in the
+// console / debugger even though the durable copy still goes to whatever sink
+// is installed (the Dart port -> app.log inside the Flutter app; the file sink
+// inside the service). This is deliberately independent of the active sink and
+// of the min-level filter's downstream: records here have already passed
+// SetMinLevel in LogKind. In release (NDEBUG) the body compiles to `(void)line`
+// so shipping builds emit nothing and the call is optimized away.
+void MirrorToConsole(const std::string& line) {
+#if !defined(NDEBUG)
+#if defined(_WIN32)
+  ::OutputDebugStringA(line.c_str());
+  ::OutputDebugStringA("\n");
+#endif
+  std::fwrite(line.data(), 1, line.size(), stdout);
+  std::fputc('\n', stdout);
+  std::fflush(stdout);
+#else
+  (void)line;
+#endif
+}
+
+// ---------------------------------------------------------------------------
 // Drain thread
 // ---------------------------------------------------------------------------
 
@@ -323,6 +362,10 @@ void WorkerMain() {
     std::string log_batch;
     for (const Record& rec : batch) {
       if (rec.kind != Kind::kLog) continue;
+      // Debug-only: echo each record to the console / debugger (no-op in
+      // release). Done here, before batching, so console lines are 1:1 with
+      // records regardless of how the sink batches them.
+      MirrorToConsole(rec.line);
       if (!log_batch.empty()) log_batch.push_back('\n');
       log_batch += rec.line;
     }

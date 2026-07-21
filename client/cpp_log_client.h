@@ -18,6 +18,10 @@
 #ifndef CPP_LOG_CLIENT_H_
 #define CPP_LOG_CLIENT_H_
 
+#include <ostream>  // std::ostream manipulators (std::endl, std::hex, ...)
+#include <sstream>  // std::ostringstream backing the CPPLOG_STREAM_* adapter
+#include <string>
+
 namespace cpplog_client {
 
 // Mirrors cpplog::Level. The numeric values ARE the cpp_log ABI
@@ -37,6 +41,73 @@ enum class Level : int {
 // side installs its port sink are retained in cpp_log's ring buffer and flushed
 // once the sink comes up.
 void Emit(Level level, const char* tag, const char* fmt, ...);
+
+// Stream-style adapter over Emit(), for the classic `LOG(INFO) << ...` idiom
+// (glog / Abseil). Accumulates operands into an ostringstream and flushes
+// exactly one record on destruction — i.e. at the end of the full expression
+// (the `;`), because the macro yields a temporary. Prefer this over the
+// printf-style CPPLOG_* when migrating existing std::cout / std::cerr code or
+// when a call site reads more naturally as a stream: every operand formats via
+// its own operator<< exactly as it did with the stream, so there is no printf
+// conversion specifier to pick (and get wrong — MSVC does not verify them).
+//
+// The accumulated text is passed to Emit as a single "%s" argument, so a stray
+// '%' in the message is never interpreted as a conversion. A trailing newline
+// (from a leftover `<< std::endl` or `<< "\n"`) is trimmed, since cpp_log adds
+// its own line separator. These are cold-path diagnostics; the per-call
+// ostringstream allocation is irrelevant here (keep hot, per-frame logging on
+// the printf-style CPPLOG_* macros).
+class LogStream {
+ public:
+  LogStream(Level level, const char* tag) : level_(level), tag_(tag) {}
+
+  ~LogStream() {
+    std::string s = oss_.str();
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) {
+      s.pop_back();
+    }
+    if (!s.empty()) {
+      Emit(level_, tag_, "%s", s.c_str());
+    }
+  }
+
+  LogStream(const LogStream&) = delete;
+  LogStream& operator=(const LogStream&) = delete;
+
+  // Values: forward to the backing stream.
+  template <typename T>
+  LogStream& operator<<(const T& value) {
+    oss_ << value;
+    return *this;
+  }
+
+  // Stream manipulators (std::endl, std::flush, std::hex, std::setw, ...).
+  LogStream& operator<<(std::ostream& (*manip)(std::ostream&)) {
+    oss_ << manip;
+    return *this;
+  }
+  LogStream& operator<<(std::ios_base& (*manip)(std::ios_base&)) {
+    oss_ << manip;
+    return *this;
+  }
+
+ private:
+  Level level_;
+  const char* tag_;
+  std::ostringstream oss_;
+};
+
+// No-op counterpart used when logging is compiled out (CPP_LOG_CLIENT_ENABLED=0)
+// so `CPPLOG_STREAM_*(tag) << a << b;` still parses and discards its operands.
+class NullStream {
+ public:
+  template <typename T>
+  NullStream& operator<<(const T&) {
+    return *this;
+  }
+  NullStream& operator<<(std::ostream& (*)(std::ostream&)) { return *this; }
+  NullStream& operator<<(std::ios_base& (*)(std::ios_base&)) { return *this; }
+};
 
 }  // namespace cpplog_client
 
@@ -64,5 +135,27 @@ void Emit(Level level, const char* tag, const char* fmt, ...);
   CPPLOG(::cpplog_client::Level::kWarn, (tag), __VA_ARGS__)
 #define CPPLOG_ERROR(tag, ...) \
   CPPLOG(::cpplog_client::Level::kError, (tag), __VA_ARGS__)
+
+// Stream-style variant: `CPPLOG_STREAM_INFO("TAG") << "x=" << x << ...;`
+// Yields a per-statement temporary LogStream that emits one record when the
+// full expression ends. See LogStream above for when to prefer this over the
+// printf-style macros. When logging is compiled out it yields a NullStream so
+// the same call sites still parse and cost nothing.
+#if CPP_LOG_CLIENT_ENABLED
+#define CPPLOG_STREAM(level, tag) ::cpplog_client::LogStream((level), (tag))
+#else
+#define CPPLOG_STREAM(level, tag) ::cpplog_client::NullStream()
+#endif
+
+#define CPPLOG_STREAM_TRACE(tag) \
+  CPPLOG_STREAM(::cpplog_client::Level::kTrace, (tag))
+#define CPPLOG_STREAM_DEBUG(tag) \
+  CPPLOG_STREAM(::cpplog_client::Level::kDebug, (tag))
+#define CPPLOG_STREAM_INFO(tag) \
+  CPPLOG_STREAM(::cpplog_client::Level::kInfo, (tag))
+#define CPPLOG_STREAM_WARN(tag) \
+  CPPLOG_STREAM(::cpplog_client::Level::kWarn, (tag))
+#define CPPLOG_STREAM_ERROR(tag) \
+  CPPLOG_STREAM(::cpplog_client::Level::kError, (tag))
 
 #endif  // CPP_LOG_CLIENT_H_
