@@ -20,6 +20,13 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <algorithm>
+
+#if defined(_WIN32)
+#include <process.h>  // _getpid
+#else
+#include <unistd.h>  // getpid
+#endif
 
 // The DartPortSink (and the vendored dynamically-linked Dart API it posts
 // through) is only meaningful inside a process that hosts a Dart isolate. A
@@ -46,9 +53,10 @@ constexpr size_t kMaxQueued = 8192;
 constexpr auto kFlushInterval = std::chrono::milliseconds(30);
 constexpr size_t kMaxBatch = 512;
 
-// FileSink defaults — chosen to match the Dart FileLogSink (2 MiB x 5).
-constexpr int64_t kDefaultMaxBytes = 2 * 1024 * 1024;
-constexpr int kDefaultMaxFiles = 5;
+// FileSink defaults — 5 MiB x 3 archives (~20 MiB cap), matching the Dart
+// FileLogSink. Archives are named by rotation end-time (see FileSink::Rotate).
+constexpr int64_t kDefaultMaxBytes = 5 * 1024 * 1024;
+constexpr int kDefaultMaxFiles = 3;
 
 // One buffered record. `line` is the fully-formatted, ready-to-emit text; the
 // timestamp/level/tag were baked in at production time. `kind` selects the
@@ -107,11 +115,25 @@ std::string NowTimestamp() {
   return std::string(buf);
 }
 
+// Current process id, formatted once as "[12345]". Cached — a process's id
+// never changes. Lets a merged view of app.log / service.log / worker.log
+// attribute each line to the process that wrote it.
+const std::string& PidField() {
+#if defined(_WIN32)
+  static const std::string s = "[" + std::to_string(_getpid()) + "]";
+#else
+  static const std::string s = "[" + std::to_string(::getpid()) + "]";
+#endif
+  return s;
+}
+
 std::string FormatLine(Level level, const char* tag,
                        const std::string& message) {
   std::string line = NowTimestamp();
   line += ' ';
   line += LevelLabel(level);
+  line += ' ';
+  line += PidField();
   line += " [";
   line += (tag && *tag) ? tag : "NATIVE";
   line += "] ";
@@ -143,9 +165,9 @@ class DartPortSink : public Sink {
 };
 #endif  // CPP_LOG_WITH_DART_PORT
 
-// Append-only file with size-based rotation. Layout mirrors the Dart
-// FileLogSink: `path` is active; archives are `path.1` (newest) .. `path.N`
-// (oldest). On rollover the oldest is deleted and the rest shift up by one.
+// Append-only file with size-based rotation. `path` is the active file; on
+// rollover it is archived as `<stem>.<YYYY-MM-DD_HH-mm-ss><ext>` (e.g.
+// app.2026-07-21_22-56-51.log) and the newest `max_files` archives are kept.
 class FileSink : public Sink {
  public:
   FileSink(std::string path, int64_t max_bytes, int max_files)
@@ -198,21 +220,70 @@ class FileSink : public Sink {
     }
   }
 
-  std::string Rot(int i) const { return path_ + "." + std::to_string(i); }
+  // "YYYY-MM-DD_HH-mm-ss" — the moment the active file was closed, used to name
+  // its archive. Date-first so archive names sort chronologically.
+  static std::string RotationStamp() {
+    using namespace std::chrono;
+    const std::time_t t = system_clock::to_time_t(system_clock::now());
+    std::tm tm{};
+#if defined(_WIN32)
+    localtime_s(&tm, &t);
+#else
+    localtime_r(&t, &tm);
+#endif
+    char buf[24];
+    std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d_%02d-%02d-%02d",
+                  tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour,
+                  tm.tm_min, tm.tm_sec);
+    return std::string(buf);
+  }
 
   void Rotate() {
     std::error_code ec;
     Close();
-    std::filesystem::remove(Rot(max_files_), ec);  // drop oldest (ok if absent)
-    for (int i = max_files_ - 1; i >= 1; --i) {
-      if (std::filesystem::exists(Rot(i), ec)) {
-        std::filesystem::rename(Rot(i), Rot(i + 1), ec);
+    const std::filesystem::path p(path_);
+    const std::filesystem::path dir = p.parent_path();
+    const std::string stem = p.stem().string();      // e.g. "app"
+    const std::string ext = p.extension().string();  // e.g. ".log"
+    // Archive the just-closed active file as "<stem>.<end-timestamp><ext>",
+    // e.g. app.2026-07-21_22-56-51.log. Disambiguate rapid same-second rolls.
+    if (std::filesystem::exists(path_, ec)) {
+      std::filesystem::path archive =
+          dir / (stem + "." + RotationStamp() + ext);
+      for (int n = 2; std::filesystem::exists(archive, ec); ++n) {
+        archive =
+            dir / (stem + "." + RotationStamp() + "-" + std::to_string(n) + ext);
+      }
+      std::filesystem::rename(path_, archive, ec);
+    }
+    PruneArchives(dir, stem, ext);
+    Open();  // fresh, empty active file
+  }
+
+  // Keeps only the newest max_files_ archives (name = chronological), deleting
+  // the oldest. The active file is never a candidate.
+  void PruneArchives(const std::filesystem::path& dir, const std::string& stem,
+                     const std::string& ext) {
+    std::error_code ec;
+    const std::string active =
+        std::filesystem::path(path_).filename().string();
+    const std::string prefix = stem + ".";
+    std::vector<std::filesystem::path> archives;
+    for (std::filesystem::directory_iterator it(dir, ec), end;
+         it != end && !ec; it.increment(ec)) {
+      if (!it->is_regular_file(ec)) continue;
+      const std::string name = it->path().filename().string();
+      if (name == active) continue;
+      if (name.size() > prefix.size() + ext.size() &&
+          name.compare(0, prefix.size(), prefix) == 0 &&
+          name.compare(name.size() - ext.size(), ext.size(), ext) == 0) {
+        archives.push_back(it->path());
       }
     }
-    if (std::filesystem::exists(path_, ec)) {
-      std::filesystem::rename(path_, Rot(1), ec);
-    }
-    Open();  // fresh, empty active file
+    if (static_cast<int>(archives.size()) <= max_files_) return;
+    std::sort(archives.begin(), archives.end());
+    const int drop = static_cast<int>(archives.size()) - max_files_;
+    for (int i = 0; i < drop; ++i) std::filesystem::remove(archives[i], ec);
   }
 
   std::string path_;
@@ -261,7 +332,8 @@ void WorkerMain() {
       std::lock_guard<std::mutex> sl(g_sink_mutex);
       if (g_sink) {
         if (dropped_snapshot > 0) {
-          g_sink->Write(NowTimestamp() + " [WARN ] [NATIVE] cpp_log dropped " +
+          g_sink->Write(NowTimestamp() + " [WARN ] " + PidField() +
+                        " [NATIVE] cpp_log dropped " +
                         std::to_string(dropped_snapshot) + " records (overrun)");
         }
         if (!log_batch.empty()) {
