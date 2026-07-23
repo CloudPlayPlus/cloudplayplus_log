@@ -4,7 +4,7 @@
 // libcpp_log.so with the NDK, and compiles a Kotlin adapter (CppLog.kt) so native
 // Android callers can funnel records into the same cpp_log core as the C++
 // plugins and the Dart FFI bridge. The Dart side loads the .so via
-// DynamicLibrary.open('libcpp_log.so') (see lib/cpp_log.dart _openLibrary).
+// DynamicLibrary.open('libcpp_log.so') (see lib/src/cpp_log_io.dart).
 //
 // NOT verified on Android yet — structural build glue only. The core sources are
 // the same ones compiled on Windows; only the NDK/Gradle build path is
@@ -48,8 +48,7 @@ android {
         minSdk 21
         externalNativeBuild {
             cmake {
-                // C++17 for std::filesystem (FileSink rotation); shared STL so a
-                // single libc++_shared.so is used app-wide.
+                // C++17 matches the shared core; use one shared STL app-wide.
                 cppFlags '-std=c++17'
                 arguments '-DANDROID_STL=c++_shared'
             }

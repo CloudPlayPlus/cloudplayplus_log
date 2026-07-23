@@ -1,10 +1,8 @@
-// Verifies the native C++ FileSink rotation end-to-end, over the real exported
-// C ABI, using the freshly built cpp_log.dll.
+// Verifies spdlog rotating-file output end-to-end over the real exported C ABI,
+// using the freshly built cpp_log.dll.
 //
-// This mirrors the approach of the app's
-// test/core/utils/logging/file_log_sink_test.dart (tiny size cap → force many
-// rollovers → assert archives are bounded), but exercises the *native* sink
-// rather than the Dart one, since rotation for native-origin logs lives in C++.
+// A tiny size cap forces many rollovers so the native rotation and archive
+// bound can be verified without producing a large fixture.
 //
 // The test is an integration-style unit test: it drives the sink through FFI.
 // If the DLL has not been built yet (e.g. `flutter test` run before
@@ -22,11 +20,11 @@ import 'package:flutter_test/flutter_test.dart';
 typedef _SetMinLevelNative = Void Function(Int32);
 typedef _SetMinLevelDart = void Function(int);
 
+typedef _InitializeNative = Int32 Function(Pointer<Utf8>, Int64, Int32, Int32);
+typedef _InitializeDart = int Function(Pointer<Utf8>, int, int, int);
+
 typedef _EmitNative = Void Function(Int32, Pointer<Utf8>, Pointer<Utf8>);
 typedef _EmitDart = void Function(int, Pointer<Utf8>, Pointer<Utf8>);
-
-typedef _UseFileSinkExNative = Void Function(Pointer<Utf8>, Int64, Int32);
-typedef _UseFileSinkExDart = void Function(Pointer<Utf8>, int, int);
 
 typedef _ShutdownNative = Void Function();
 typedef _ShutdownDart = void Function();
@@ -64,7 +62,7 @@ Future<void> _waitUntil(bool Function() cond, Duration timeout) async {
 }
 
 void main() {
-  test('native FileSink rotates by size and caps archives', () async {
+  test('native spdlog sink rotates by size and caps archives', () async {
     final dllPath = _findDll();
     if (dllPath == null) {
       markTestSkipped(
@@ -84,20 +82,19 @@ void main() {
 
     final setMinLevel = lib
         .lookupFunction<_SetMinLevelNative, _SetMinLevelDart>(
-      'cpp_log_set_min_level',
+          'cpp_log_set_min_level',
+        );
+    final emit = lib.lookupFunction<_EmitNative, _EmitDart>('cpp_log_emit');
+    final initialize = lib.lookupFunction<_InitializeNative, _InitializeDart>(
+      'cpp_log_initialize',
     );
-    final emit =
-        lib.lookupFunction<_EmitNative, _EmitDart>('cpp_log_emit');
-    final useFileSinkEx = lib
-        .lookupFunction<_UseFileSinkExNative, _UseFileSinkExDart>(
-      'cpp_log_use_file_sink_ex',
+    final shutdown = lib.lookupFunction<_ShutdownNative, _ShutdownDart>(
+      'cpp_log_shutdown',
     );
-    final shutdown =
-        lib.lookupFunction<_ShutdownNative, _ShutdownDart>('cpp_log_shutdown');
 
     final tempDir = Directory.systemTemp.createTempSync('cpp_log_native_');
     final appLog = '${tempDir.path}${Platform.pathSeparator}app.log';
-    String rotated(int i) => '$appLog.$i';
+    String rotated(int i) => '${appLog.substring(0, appLog.length - 4)}.$i.log';
 
     final tagPtr = 'TEST'.toNativeUtf8();
     try {
@@ -105,7 +102,7 @@ void main() {
 
       final pathPtr = appLog.toNativeUtf8();
       // Tiny 256-byte cap forces many rollovers; cap archives at 3.
-      useFileSinkEx(pathPtr, 256, 3);
+      expect(initialize(pathPtr, 256, 3, 256), 0);
       malloc.free(pathPtr);
 
       // ~55 bytes/line * 200 lines ≈ 11 KB → dozens of rotations.
@@ -124,7 +121,11 @@ void main() {
       );
 
       // Active file always exists.
-      expect(File(appLog).existsSync(), isTrue, reason: 'active app.log exists');
+      expect(
+        File(appLog).existsSync(),
+        isTrue,
+        reason: 'active app.log exists',
+      );
       // After many rollovers at least one archive exists...
       expect(
         File(rotated(1)).existsSync(),
@@ -142,7 +143,11 @@ void main() {
       // Every persisted line keeps the shared format: "<ts> [INFO ] [TEST] ...".
       expect(
         File(appLog).readAsStringSync(),
-        matches(RegExp(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} \[INFO \] \[TEST\] ')),
+        matches(
+          RegExp(
+            r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} \[INFO \] \[TEST\] ',
+          ),
+        ),
       );
     } finally {
       malloc.free(tagPtr);

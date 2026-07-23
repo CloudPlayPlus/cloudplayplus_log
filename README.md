@@ -1,131 +1,94 @@
 # cpp_log
 
-Shared **native logging core** for CloudPlayPlus, packaged as a local Flutter
-FFI plugin. It gives C++ plugin code (and native-only processes) a structured,
-leveled, batched logger whose records land in the **same `app.log`** as
-Dart-origin logs — byte-for-byte identical format, one ordered file.
+CloudPlayPlus 的进程级原生日志运行时。它把 spdlog 封装在一个 Flutter
+插件内，同时提供 Dart FFI、稳定 C ABI 和 C++ 宏，避免每个插件各自创建
+日志队列和写文件线程。
 
-This is the reusable core behind the unified-logging plan. It is intentionally
-self-contained (no other plugin deps) so any plugin can link it, or the app can
-open the standalone `cpp_log.dll`.
+## 数据路径
 
-## Log line format
-
-Identical to the Dart side (`lib/core/utils/vlog.dart`):
-
+```text
+Dart CppLog.emit ─┐
+C cpp_log_emit ───┼─> spdlog async queue ─> rotating app.log
+C++ CPPLOG_* ─────┘                         └> optional Dart live view
 ```
+
+- 单进程一个 `cpp_log` 动态库、一个 8192 槽有界队列、一个写线程。
+- 队列满时覆盖最旧记录，不阻塞媒体线程；丢弃总数可通过
+  `cpp_log_dropped_count()` 查询。
+- 文件默认 5 MiB × 3 个归档，每 2 秒异步 flush，`warn` 以上立即安排
+  flush。
+- Windows 同时输出到 `OutputDebugString`，Android 同时输出到 logcat。
+- Dart native port 只是可选的实时日志视图，文件写入不绕行 Dart。
+
+日志格式：
+
+```text
 yyyy-MM-dd HH:mm:ss.mmm [LEVEL] [TAG] message
 ```
 
-Fixed-width labels: `[TRACE] [DEBUG] [INFO ] [WARN ] [ERROR]`. Timestamps are
-captured natively **at the production moment**, never on the sink side.
+## API
 
-## Architecture
+公共头文件：
 
-```
-CPPLOG / cpp_log_emit ─► ring buffer (8192, drop-oldest + loss count)
-                              │
-                     drain thread (batch 512 / 30 ms)
-                              │
-                        Sink::Write(batch)
-                          ┌───┴────────────┐
-                   DartPortSink        FileSink
-              (Dart_PostCObject)   (rotating app.log)
-```
+- `include/cpp_log/cpp_log_c.h`：稳定 C ABI，供 FFI/C/ObjC 调用。
+- `include/cpp_log/cpp_log.h`：C++ `CPPLOG_TRACE/DEBUG/INFO/WARN/ERROR`
+  宏，自动携带源码位置。
 
-* **Ring buffer** — 8192 records; on overrun the *oldest* is dropped (the
-  producer never blocks) and the loss is counted and surfaced as a `[WARN ]`
-  record on the next flush.
-* **Drain thread** — coalesces up to 512 records or 30 ms into one sink write.
-* **Pluggable `Sink`** — `struct Sink { virtual void Write(const std::string&) = 0; };`.
-  The drain thread is sink-agnostic (no hard-coded transport).
-* **`Kind` field** — every record carries a channel (`log` / `metric` / `event`).
-  Only `log` is emitted today; `metric`/`event` are reserved so the routing
-  switch (native and Dart) can grow without an ABI break.
-* **`SetMinLevel`** — atomic, default `info`.
-
-### Shipped sinks
-
-* **`DartPortSink`** — holds a Dart native port and posts each batch as a string
-  via `Dart_PostCObject` (works from any thread). The Dart side funnels batches
-  into the app's on-disk sink.
-* **`FileSink`** — append + size-based rotation + archive cap, parameterized by
-  path / bytes-per-file / archive count (defaults 2 MiB × 5, matching the Dart
-  `FileLogSink`). Layout: `app.log` active, `app.log.1` (newest) … `app.log.N`
-  (oldest). For native-only processes with no Dart isolate.
-
-## Public API
-
-### C ABI — `src/cpp_log_c.h` (`extern "C"`, for Dart FFI / ObjC / Swift / C)
-
-| Symbol | Purpose |
-| --- | --- |
-| `cpp_log_init_dart_api(void*)` | Init the DL Dart API (`NativeApi.initializeApiDLData`); returns 0 on success. |
-| `cpp_log_set_port(int64_t)` | Install a `DartPortSink` (0 detaches). |
-| `cpp_log_set_min_level(int32_t)` | 0=trace … 4=error. |
-| `cpp_log_emit(int32_t, const char* tag, const char* msg)` | Emit one record. |
-| `cpp_log_use_file_sink(const char* path)` | Switch to a rotating `FileSink` (defaults). |
-| `cpp_log_use_file_sink_ex(const char* path, int64_t maxBytes, int32_t maxFiles)` | …with explicit rotation bounds. |
-| `cpp_log_shutdown(void)` | Flush, stop the drain thread, close the sink. |
-
-### C++ — `src/cpp_log_core.h`
-
-`namespace cpplog` with `Level`, `Kind`, `Sink`, the control functions, and the
-`CPPLOG(level, tag, fmt, ...)` macro (plus `CPPLOG_TRACE/DEBUG/INFO/WARN/ERROR`).
-Compile-time gate: define `CPP_LOG_ENABLED=0` to strip all call sites.
-
-### Dart — `lib/cpp_log.dart`
+Dart：
 
 ```dart
-// In the app (native → Dart → app.log):
-await CppLog.instance.start(
+final ok = CppLog.instance.initialize(
+  filePath: logPath,
   minLevel: CppLogLevel.info,
-  onLogBatch: FileLogSink.instance.add, // funnel into the shared app.log
 );
-CppLog.instance.emit(CppLogLevel.info, 'NATIVE', 'hello from C++');
-
-// In a native-only process (write a rotating file directly):
-CppLog.instance.useFileSink(r'C:\...\logs\app.log', maxBytes: 2 << 20, maxFiles: 5);
+CppLog.instance.emit(CppLogLevel.info, 'APP', 'started');
 ```
 
-Incoming batches are routed by `CppLogKind`; only the `log` branch is wired
-today.
+`CppLog` 的 Dart facade 只应在 root isolate 使用；后台 isolate 应把记录转发
+到 root isolate。C/C++ API 可继续由原生工作线程直接调用。重复调用
+`initialize()` 会切换文件 sink 和最低级别，但沿用现有异步队列及其初始
+容量，直到 `stop()` 重建 runtime。
 
-## Layout
+C++：
 
+```cpp
+#include <cpp_log/cpp_log.h>
+
+CPPLOG_INFO("VIDEO", "Selected encoder: %s", encoder_name);
+CPPLOG_ERROR("NETWORK", "Connection failed: %d", error_code);
 ```
-src/cpp_log_core.{h,cc}          # C++ core + CPPLOG macro
-src/cpp_log_c.h                  # stable C ABI
-src/third_party/dart_dl/         # vendored Dart SDK DL glue (6 files, BSD)
-windows/CMakeLists.txt           # builds the cpp_log target from ../src
-lib/cpp_log.dart                 # Dart FFI wrapper
-test/cpp_log_file_sink_test.dart # native FileSink rotation test (via FFI)
-example/                         # minimal app; also the Windows build harness
-```
 
-## Build notes (Windows)
+宿主提供 `cpp_log_plugin` 时，其他 Flutter C++ 插件可链接该 target 共享同一
+runtime，不能自行编译 spdlog。插件独立构建时应保留无日志 fallback，避免把
+`cpp_log` 变成其 Dart package 的强制依赖。
 
-`windows/CMakeLists.txt` builds the `cpp_log` shared library **directly** from
-`../src` (rather than delegating to a `src/CMakeLists.txt`), keeping the native
-sources in one reusable place:
+## 第三方依赖
 
-* `project(... LANGUAGES CXX C)` — C is required so the vendored
-  `dart_api_dl.c` is compiled and the `Dart_*_DL` symbols link.
-* `dart_api_dl.c` is compiled with `/w` (third-party SDK code, exempt from our
-  warning bar).
-* `CPP_LOG_BUILDING_DLL` drives `__declspec(dllexport)` on the exported symbols.
-* C++17 is required for `std::filesystem` (FileSink rotation).
-* The output `cpp_log.dll` is bundled next to the app so
-  `DynamicLibrary.open('cpp_log.dll')` resolves.
+spdlog 固定为 `v1.17.0`，位于 `third_party/spdlog`，使用其 MIT
+许可证。当前采用私有 header-only 集成：spdlog 头文件只由
+`cpp_log_core.cc` 包含，因此实现仍只编进一个动态库，不会散落到调用方。
 
-## Verify
+## 验证
 
-```bash
+```powershell
 flutter pub get
 flutter analyze lib test
-cd example && flutter build windows --debug   # compiles + links the native core
-cd .. && flutter test                         # native FileSink rotation (FFI)
+cd example
+flutter build windows --debug
+cd ..
+flutter test test/cpp_log_file_sink_test.dart
 ```
 
-The rotation test drives the real `cpp_log.dll` through the C ABI; it skips
-gracefully if the DLL has not been built yet.
+Windows 已完成构建、FFI 文件轮转和主应用运行验证。Linux、Android、
+macOS、iOS 已有构建胶水，但仍需要对应平台 CI/真机验证。
+
+若要测量 Dart 生产端路径，可把已构建的 `cpp_log.dll` 目录放到
+`PATH` 最前面后运行：
+
+```powershell
+$env:PATH="<runner-output-directory>;$env:PATH"
+dart run benchmark/emit_benchmark.dart
+```
+
+结果只统计 Dart → FFI → 有界异步队列的入队时间；随后由 shutdown
+排空队列，因此生产端数据不包含文件系统吞吐耗时。

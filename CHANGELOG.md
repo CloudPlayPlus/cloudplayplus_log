@@ -1,3 +1,12 @@
+## 0.1.0
+
+* Replace the custom queue, worker, and file rotation with a single spdlog
+  asynchronous runtime.
+* Add direct Dart-to-native file logging, periodic flush, overflow accounting,
+  source-aware C++ macros, and a Web-safe Dart stub.
+* Expose the Windows logger as a regular Flutter plugin target so other native
+  plugins can link the same `cpp_log.dll`.
+
 ## 0.0.1
 
 * Initial local release: shared native logging core for CloudPlayPlus.
