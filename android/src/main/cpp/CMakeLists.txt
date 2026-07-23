@@ -8,6 +8,9 @@ project(cpp_log LANGUAGES CXX C)
 
 # From android/src/main/cpp back up to the plugin root, then into the shared src.
 set(CPP_LOG_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../src")
+set(CPP_LOG_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../include")
+set(SPDLOG_INCLUDE_DIR
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../../../third_party/spdlog/include")
 
 add_library(cpp_log SHARED
   "${CPP_LOG_SRC_DIR}/cpp_log_core.cc"
@@ -21,7 +24,12 @@ set_target_properties(cpp_log PROPERTIES
 )
 
 # The JNI shim (cpp_log_jni.cc) and the core both include headers from ../src.
-target_include_directories(cpp_log PRIVATE "${CPP_LOG_SRC_DIR}")
+target_include_directories(cpp_log
+  PUBLIC "${CPP_LOG_INCLUDE_DIR}"
+  PRIVATE
+    "${CPP_LOG_SRC_DIR}"
+    "${SPDLOG_INCLUDE_DIR}"
+)
 
 # Parity with the other platforms; on non-Windows the export macro is the
 # visibility attribute regardless, so this define is a harmless no-op here.

@@ -2,7 +2,7 @@
 #
 # Compiles the shared native logging core from ../src into a static library that
 # the Flutter tool links into the host app; the app reaches the C ABI over
-# dart:ffi via DynamicLibrary.process() (see lib/cpp_log.dart _openLibrary).
+# dart:ffi via DynamicLibrary.process() (see lib/src/cpp_log_io.dart _openLibrary).
 #
 # NOT verified on iOS yet — structural build glue only. The C ABI compiled here
 # is the same one validated on Windows; only the CocoaPods/Xcode build path is
@@ -12,11 +12,11 @@
 # on it.
 Pod::Spec.new do |s|
   s.name             = 'cpp_log'
-  s.version          = '0.0.1'
+  s.version          = '0.1.0'
   s.summary          = 'Shared native logging core (FFI) for CloudPlayPlus.'
   s.description      = <<-DESC
-Leveled, batched, pluggable-sink C++ logger that funnels native-origin logs into
-the same app.log as Dart-origin logs.
+Process-wide asynchronous spdlog runtime that funnels Dart and native records
+into the same rotating app.log.
                        DESC
   s.homepage         = 'https://www.cloudplayplus.com'
   s.license          = { :file => '../LICENSE' }
@@ -33,7 +33,7 @@ the same app.log as Dart-origin logs.
     '../include/cpp_log/cpp_log_apple.h',
   ]
   s.public_header_files = '../include/cpp_log/cpp_log_apple.h'
-  s.preserve_paths = '../src/**/*', '../include/**/*'
+  s.preserve_paths = '../src/**/*', '../include/**/*', '../third_party/spdlog/**/*'
 
   s.dependency 'Flutter'
   s.platform = :ios, '12.0'
@@ -43,7 +43,8 @@ the same app.log as Dart-origin logs.
     # See macos/cpp_log.podspec: harmless on non-Windows, kept for parity.
     'GCC_PREPROCESSOR_DEFINITIONS' => 'CPP_LOG_BUILDING_DLL=1',
     'HEADER_SEARCH_PATHS' =>
-      '"${PODS_TARGET_SRCROOT}/../src" "${PODS_TARGET_SRCROOT}/../include"',
+      '"${PODS_TARGET_SRCROOT}/../src" "${PODS_TARGET_SRCROOT}/../include" ' \
+      '"${PODS_TARGET_SRCROOT}/../third_party/spdlog/include"',
     # Flutter FFI plugins are built for physical devices + arm64 simulators.
     'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386',
   }

@@ -1,6 +1,6 @@
 name: cpp_log
-description: "Shared native logging core (FFI) for CloudPlayPlus: a leveled, batched, pluggable-sink C++ logger that funnels native-origin logs into the same app.log as Dart-origin logs."
-version: 0.0.1
+description: "Process-wide spdlog runtime for CloudPlayPlus with Dart FFI and a stable native C/C++ API."
+version: 0.1.0
 publish_to: 'none'
 homepage: www.cloudplayplus.com
 
@@ -39,6 +39,7 @@ flutter:
   plugin:
     platforms:
       windows:
+        pluginClass: CppLogPluginCApi
         ffiPlugin: true
       # -------------------------------------------------------------------
       # The platforms below are BUILD GLUE ONLY — WRITE-ONLY / NOT yet

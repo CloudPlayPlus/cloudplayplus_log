@@ -3,10 +3,10 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  cpp_log
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST
-  cpp_log
 )
 
 set(PLUGIN_BUNDLED_LIBRARIES)

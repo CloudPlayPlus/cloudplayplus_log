@@ -12,7 +12,7 @@
 // build/link path is unvalidated.
 //
 // Level ordinals match the C ABI (mirrored in cpp_log_c.h / lib/cpp_log.dart):
-//   0=trace 1=debug 2=info 3=warn 4=error
+//   0=trace 1=debug 2=info 3=warn 4=error 5=critical
 #ifndef CPP_LOG_APPLE_H_
 #define CPP_LOG_APPLE_H_
 
@@ -50,5 +50,6 @@ static inline void CppLogEmitNS(int level, const char* tag, NSString* message) {
 #define CPPLOGM_INFO(tag, fmt, ...) CPPLOGM(2, (tag), (fmt), ##__VA_ARGS__)
 #define CPPLOGM_WARN(tag, fmt, ...) CPPLOGM(3, (tag), (fmt), ##__VA_ARGS__)
 #define CPPLOGM_ERROR(tag, fmt, ...) CPPLOGM(4, (tag), (fmt), ##__VA_ARGS__)
+#define CPPLOGM_CRITICAL(tag, fmt, ...) CPPLOGM(5, (tag), (fmt), ##__VA_ARGS__)
 
 #endif  // CPP_LOG_APPLE_H_

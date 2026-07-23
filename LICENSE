@@ -1,1 +1,8 @@
-TODO: Add your license here.
+Copyright (c) 2026 CloudPlayPlus. All rights reserved.
+
+This repository is CloudPlayPlus proprietary software. Source availability does
+not grant permission to copy, modify, distribute, sublicense, or sell it without
+written authorization from CloudPlayPlus.
+
+Third-party software retains its own license. In particular, spdlog is
+distributed under the MIT License; see third_party/spdlog/LICENSE.
