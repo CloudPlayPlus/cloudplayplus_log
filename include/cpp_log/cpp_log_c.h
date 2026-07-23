@@ -34,7 +34,8 @@ CPP_LOG_C_API int32_t cpp_log_initialize(const char* path, int64_t max_bytes,
 CPP_LOG_C_API intptr_t cpp_log_init_dart_api(void* dart_api_dl_data);
 
 // Attaches an optional Dart native port, or detaches it when port is zero.
-// The rotating file sink remains active.
+// Before attaching a non-zero port, cpp_log_init_dart_api() must have returned
+// zero for this Dart process. The rotating file sink remains active.
 CPP_LOG_C_API void cpp_log_set_port(int64_t port);
 
 CPP_LOG_C_API void cpp_log_set_min_level(int32_t level);

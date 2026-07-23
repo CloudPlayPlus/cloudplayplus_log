@@ -41,6 +41,7 @@ CPP_LOG_API bool InitializeFile(const std::string& path,
                                 int max_files = 3,
                                 int queue_capacity = 8192);
 CPP_LOG_API intptr_t InitDartApi(void* dart_api_dl_data);
+// InitDartApi() must succeed before attaching a non-zero Dart port.
 CPP_LOG_API void SetPort(int64_t port);
 CPP_LOG_API void SetMinLevel(Level level);
 CPP_LOG_API bool ShouldLog(Level level);

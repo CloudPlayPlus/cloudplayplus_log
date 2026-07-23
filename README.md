@@ -44,6 +44,11 @@ final ok = CppLog.instance.initialize(
 CppLog.instance.emit(CppLogLevel.info, 'APP', 'started');
 ```
 
+`CppLog` 的 Dart facade 只应在 root isolate 使用；后台 isolate 应把记录转发
+到 root isolate。C/C++ API 可继续由原生工作线程直接调用。重复调用
+`initialize()` 会切换文件 sink 和最低级别，但沿用现有异步队列及其初始
+容量，直到 `stop()` 重建 runtime。
+
 C++：
 
 ```cpp

@@ -7,6 +7,11 @@ import 'package:ffi/ffi.dart';
 import 'cpp_log_types.dart';
 
 /// Dart FFI facade over the single process-wide native logging runtime.
+///
+/// Use this singleton only from the root isolate. The Dart wrapper owns
+/// isolate-local cached tag pointers and native-port lifecycle; background
+/// isolates should forward records to the root isolate. The native C and C++
+/// APIs remain safe for native producer threads.
 class CppLog {
   CppLog._();
 
@@ -41,6 +46,10 @@ class CppLog {
   ///
   /// Returns false instead of throwing when the native library or log file
   /// cannot be opened.
+  ///
+  /// Repeated calls replace the rotating file sink and update [minLevel]. The
+  /// existing async queue, including its original [queueCapacity], is reused
+  /// until [stop] tears down the process-wide runtime.
   bool initialize({
     required String filePath,
     CppLogLevel minLevel = CppLogLevel.info,
@@ -100,6 +109,8 @@ class CppLog {
   }
 
   /// Copies one UTF-8 message into the native bounded queue and returns.
+  ///
+  /// Call this Dart facade only from the root isolate.
   void emit(CppLogLevel level, String tag, String message) {
     final _EmitDart? emit = _emit;
     if (emit == null || !isEnabled(level)) return;
