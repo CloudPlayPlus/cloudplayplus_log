@@ -42,15 +42,16 @@ flutter:
         pluginClass: CppLogPluginCApi
         ffiPlugin: true
       # -------------------------------------------------------------------
-      # The platforms below are BUILD GLUE ONLY — WRITE-ONLY / NOT yet
-      # verified on the respective platforms (see task P6). Windows is the
-      # validated path. Each entry has matching native build files:
+      # The platforms below use platform-specific native build glue. Windows
+      # and macOS are validated paths; Linux, Android, and iOS remain
+      # structural-only until their respective platform verification. Each
+      # entry has matching native build files:
       #   macos   -> macos/cpp_log.podspec
       #   ios     -> ios/cpp_log.podspec
       #   linux   -> linux/CMakeLists.txt
       #   android -> android/build.gradle + android/src/main/cpp/CMakeLists.txt
       # The Dart FFI bridge resolves libcpp_log.so on Android/Linux and uses
-      # DynamicLibrary.process() on Apple; treat non-Windows as experimental.
+      # DynamicLibrary.process() on Apple.
       # -------------------------------------------------------------------
       macos:
         ffiPlugin: true
