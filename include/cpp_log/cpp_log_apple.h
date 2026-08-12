@@ -6,10 +6,9 @@
 // and the Dart FFI bridge. It is a thin inline wrapper over `cpp_log_emit` from
 // cpp_log_c.h; no Objective-C runtime state is added.
 //
-// NOT verified on macOS / iOS hardware yet — this is structural build glue that
-// ships with the podspecs (see macos/ios/cpp_log.podspec). The C ABI it calls is
-// the same one exercised on Windows, so the contract is stable; only the Apple
-// build/link path is unvalidated.
+// The macOS framework/link path and shared C ABI file sink are validated through
+// the CloudPlayPlus host app. The iOS build path and this Objective-C convenience
+// adapter still require their respective platform verification.
 //
 // Level ordinals match the C ABI (mirrored in cpp_log_c.h / lib/cpp_log.dart):
 //   0=trace 1=debug 2=info 3=warn 4=error 5=critical

@@ -4,9 +4,8 @@
 # the Flutter tool links into the host app; the app then reaches the C ABI over
 # dart:ffi via DynamicLibrary.process() (see lib/src/cpp_log_io.dart _openLibrary).
 #
-# NOT verified on macOS yet — structural build glue only. The C ABI compiled
-# here is the same one validated on Windows; only the CocoaPods/Xcode build path
-# is unvalidated.
+# The CocoaPods/Xcode path is exercised through the CloudPlayPlus macOS host
+# build; the exported C ABI and rotating file sink are verified there.
 #
 # Run `pod lib lint` from this directory to sanity-check the spec before relying
 # on it.
@@ -23,16 +22,12 @@ into the same rotating app.log.
   s.author           = { 'CloudPlayPlus' => 'dev@cloudplayplus.com' }
   s.source           = { :path => '.' }
 
-  # Compile the shared core + the vendored Dart DL glue that lives one level up
-  # in ../src (shared with the Windows/Linux/Android builds), plus expose the
-  # Objective-C adapter header. Path-based (development) pods may reference files
-  # outside the pod directory; preserve_paths keeps ../src and ../include around.
-  s.source_files = [
-    '../src/cpp_log_core.cc',
-    '../src/third_party/dart_dl/dart_api_dl.c',
-    '../include/cpp_log/cpp_log_apple.h',
-  ]
-  s.public_header_files = '../include/cpp_log/cpp_log_apple.h'
+  # CocoaPods drops source_files entries that escape the pod root, so direct
+  # ../src paths turn this development pod into a target with no implementation.
+  # Keep tiny wrappers under macos/Classes and include the shared sources from
+  # there; preserve_paths keeps those shared sources and headers available.
+  s.source_files = 'Classes/**/*.{h,c,cc}'
+  s.public_header_files = 'Classes/cpp_log_apple.h'
   s.preserve_paths = '../src/**/*', '../include/**/*', '../third_party/spdlog/**/*'
 
   s.dependency 'FlutterMacOS'
@@ -43,7 +38,8 @@ into the same rotating app.log.
     # Match the Windows target: export the C ABI symbols. On non-Windows the
     # export macro resolves to __attribute__((visibility("default"))), so this
     # define is harmless but kept for parity.
-    'GCC_PREPROCESSOR_DEFINITIONS' => 'CPP_LOG_BUILDING_DLL=1',
+    'GCC_PREPROCESSOR_DEFINITIONS' =>
+      '$(inherited) CPP_LOG_BUILDING_DLL=1 CPP_LOG_AVAILABLE=1',
     'HEADER_SEARCH_PATHS' =>
       '"${PODS_TARGET_SRCROOT}/../src" "${PODS_TARGET_SRCROOT}/../include" ' \
       '"${PODS_TARGET_SRCROOT}/../third_party/spdlog/include"',
