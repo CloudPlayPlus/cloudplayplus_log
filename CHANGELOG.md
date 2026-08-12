@@ -1,3 +1,8 @@
+## Unreleased
+
+* Fix the macOS CocoaPods target so the shared logging core and Dart DL glue
+  are compiled into the framework and exported to the host process.
+
 ## 0.1.0
 
 * Replace the custom queue, worker, and file rotation with a single spdlog

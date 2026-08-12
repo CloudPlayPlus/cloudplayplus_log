@@ -79,8 +79,9 @@ cd ..
 flutter test test/cpp_log_file_sink_test.dart
 ```
 
-Windows 已完成构建、FFI 文件轮转和主应用运行验证。Linux、Android、
-macOS、iOS 已有构建胶水，但仍需要对应平台 CI/真机验证。
+Windows 已完成构建、FFI 文件轮转和主应用运行验证。macOS 已通过
+CloudPlayPlus 主应用完成 universal framework、进程级 FFI 符号解析和文件落盘
+验证。Linux、Android、iOS 已有构建胶水，但仍需要对应平台 CI/真机验证。
 
 若要测量 Dart 生产端路径，可把已构建的 `cpp_log.dll` 目录放到
 `PATH` 最前面后运行：
