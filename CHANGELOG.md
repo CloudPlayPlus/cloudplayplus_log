@@ -2,6 +2,9 @@
 
 * Fix the macOS CocoaPods target so the shared logging core and Dart DL glue
   are compiled into the framework and exported to the host process.
+* Fix the iOS CocoaPods target the same way: `../src` source paths were dropped,
+  so `cpp_log.framework` shipped without any `cpp_log_*` symbols and file
+  logging could not start on iOS.
 
 ## 0.1.0
 
